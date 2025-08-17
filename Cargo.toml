@@ -1,0 +1,21 @@
+[package]
+name = "extarray"
+version = "1.0.0"
+edition = "2024"
+authors = ["Nathan Fiedler <nathanfiedler@fastmail.fm>"]
+description = "Space-Efficient Extensible Arrays"
+repository = "https://github.com/nlfiedler/extarray"
+readme = "README.md"
+keywords = [
+    "collections",
+    "dynamic-arrays",
+    "extensible-arrays",
+    "resizable-arrays",
+    "data-structures",
+]
+categories = ["data-structures"]
+license = "MIT"
+exclude = ["TODO.org", "test/*"]
+
+[dev-dependencies]
+ulid = "1.2.1"
