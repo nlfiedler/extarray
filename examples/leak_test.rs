@@ -4,40 +4,47 @@
 use extarray::ExtensibleArray;
 
 //
-// Basically useless except that it can be tested with a memory analyzer to
-// determine if the segment array is leaking memory. By storing `String` instead
-// of numbers, this is more interesting in terms of memory management since the
-// array must drop all of the values, either when the collection is dropped,
-// when an IntoIterator is used and eventually dropped.
+// Create and drop collections and iterators in order to test for memory leaks.
+// Must allocate Strings in order to fully test the drop implementation.
 //
 fn main() {
+    // add only enough values to allocate one segment
     let mut array: ExtensibleArray<String> = ExtensibleArray::new();
-    // add enough values to allocate a bunch of segments
-    for _ in 0..15_020 {
+    for _ in 0..2 {
         let value = ulid::Ulid::new().to_string();
         array.push(value);
     }
+    drop(array);
 
-    // use an into iterator the to visit elements from various segments
-    for (index, value) in array.into_iter().skip(1).enumerate() {
-        if index == 1 {
-            println!("1: {value}");
-        } else if index == 15 {
-            println!("15: {value}");
-        } else if index == 48 {
-            println!("48: {value}");
-        } else if index == 240 {
-            println!("240: {value}");
-        } else if index == 512 {
-            println!("512: {value}");
-        } else if index == 1024 {
-            println!("1024: {value}");
-        } else if index == 15_000 {
-            println!("15_000: {value}");
+    // add enough values to allocate a bunch of segments
+    let mut array: ExtensibleArray<String> = ExtensibleArray::new();
+    for _ in 0..80 {
+        let value = ulid::Ulid::new().to_string();
+        array.push(value);
+    }
+    drop(array);
+
+    // IntoIterator: add only enough values to allocate one segment
+    let mut array: ExtensibleArray<String> = ExtensibleArray::new();
+    for _ in 0..2 {
+        let value = ulid::Ulid::new().to_string();
+        array.push(value);
+    }
+    let itty = array.into_iter();
+    drop(itty);
+
+    // IntoIterator: add enough values to allocate a bunch of segments
+    let mut array: ExtensibleArray<String> = ExtensibleArray::new();
+    for _ in 0..250 {
+        let value = ulid::Ulid::new().to_string();
+        array.push(value);
+    }
+    // skip enough elements to pass over a few segments then drop
+    for (index, value) in array.into_iter().skip(28).enumerate() {
+        if index == 28 {
+            println!("28: {value}");
             // exit the iterator early intentionally
             break;
         }
     }
-    // now the Drop implementation for the IntoIter will be invoked and the
-    // memory analyzer can catch even more issues
 }

@@ -13,9 +13,9 @@
 //! of elements, otherwise `Vec` would be more appropriate. An empty array will
 //! have a size of around 40 bytes. The size may not be an issue, but the lookup
 //! operation has a non-trivial cost, unlike `Vec`.
-//! 
+//!
 //! # Performance
-//! 
+//!
 //! Most operations are either constant time, or log2 or sqrt of the collection
 //! size. However, the lookup operation involves several calculations and as
 //! such the overall performance will be worse than `Vec`. The difference will
@@ -337,9 +337,9 @@ impl<T> ExtensibleArray<T> {
 
     /// Clears the extensible array, removing and dropping all values and
     /// deallocating all previously allocated segments.
-    /// 
+    ///
     /// # Time complexity
-    /// 
+    ///
     /// sqrt(count)
     pub fn clear(&mut self) {
         use std::ptr::{drop_in_place, slice_from_raw_parts_mut};
@@ -349,7 +349,12 @@ impl<T> ExtensibleArray<T> {
             let (last_segment, last_slot) = mapping(self.count - 1);
             if std::mem::needs_drop::<T>() {
                 unsafe {
-                    drop_in_place(slice_from_raw_parts_mut(self.dope[last_segment], last_slot));
+                    // last_slot is pointing at the last element, need to add
+                    // one to include it in the slice
+                    drop_in_place(slice_from_raw_parts_mut(
+                        self.dope[last_segment],
+                        last_slot + 1,
+                    ));
                 }
             }
             // deallocate the last segment
@@ -493,9 +498,11 @@ impl<T> Drop for ExtArrayIntoIter<T> {
                 // special-case, remaining values are in only one segment
                 if first_slot < last_slot {
                     unsafe {
+                        // last_slot is pointing at the last element, need to
+                        // add one to include it in the slice
                         drop_in_place(slice_from_raw_parts_mut(
                             self.dope[first_segment].add(first_slot),
-                            last_slot - first_slot,
+                            last_slot - first_slot + 1,
                         ));
                     }
                 }
@@ -513,7 +520,10 @@ impl<T> Drop for ExtArrayIntoIter<T> {
 
                 // drop the values in the last segment
                 unsafe {
-                    drop_in_place(slice_from_raw_parts_mut(self.dope[last_segment], last_slot));
+                    drop_in_place(slice_from_raw_parts_mut(
+                        self.dope[last_segment],
+                        last_slot + 1,
+                    ));
                 }
 
                 // drop the values in all of the other segments

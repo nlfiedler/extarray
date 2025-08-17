@@ -31,7 +31,7 @@ fn create_vector(size: u64) {
 
 fn main() {
     println!("creating ExtensibleArray...");
-    create_segarray(1_000_000_000);
+    create_segarray(100_000_000);
     println!("creating Vec...");
-    create_vector(1_000_000_000);
+    create_vector(100_000_000);
 }

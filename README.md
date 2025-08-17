@@ -2,7 +2,7 @@
 
 ## Overview
 
-An append-only (no insert or remove) growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
+This Rust crate implements an append-only (no insert or remove) growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
 
 * ACM ISBN 979-8-4007-0021-7/22/12
 * https://doi.org/10.1145/3572960.3572984
@@ -26,9 +26,40 @@ From section 2 of the paper:
 
 The specification for the data structure is contained in section 3 of the paper.
 
+For a different but similar data structure, see the [nlfiedler/segarray](https://github.com/nlfiedler/segarray) repository for an implementation of Segment Arrays in Rust.
+
+## Examples
+
+A simple example copied from the unit tests.
+
+```rust
+let inputs = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+];
+let mut arr: ExtensibleArray<String> = ExtensibleArray::new();
+for item in inputs {
+    arr.push(item.to_owned());
+}
+for (idx, elem) in arr.iter().enumerate() {
+    assert_eq!(inputs[idx], elem);
+}
+```
+
 ## Supported Rust Versions
 
 The Rust edition is set to `2024` and hence version `1.85.0` is the minimum supported version.
+
+## Troubleshooting
+
+### Memory Leaks
+
+Finding memory leaks with [Address Sanitizer](https://clang.llvm.org/docs/AddressSanitizer.html) is fairly [easy](https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html) and seems to work best on Linux. The shell script below gives a quick demonstration of running one of the examples with ASAN analysis enabled.
+
+```shell
+#!/bin/sh
+env RUSTDOCFLAGS=-Zsanitizer=address RUSTFLAGS=-Zsanitizer=address \
+    cargo run -Zbuild-std --target x86_64-unknown-linux-gnu --release --example leak_test
+```
 
 ## References
 
