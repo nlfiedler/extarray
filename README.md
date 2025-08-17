@@ -2,7 +2,7 @@
 
 ## Overview
 
-This Rust crate implements an append-only (no insert or remove) growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
+This Rust [crate](https://crates.io/crates/extarray) implements an append-only (no insert or remove) growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
 
 * ACM ISBN 979-8-4007-0021-7/22/12
 * https://doi.org/10.1145/3572960.3572984
