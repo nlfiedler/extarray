@@ -2,20 +2,20 @@
 
 ## Overview
 
-This Rust [crate](https://crates.io/crates/extarray) implements an append-only (no insert or remove) growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
+This Rust [crate](https://crates.io/crates/extarray) implements a growable array as described in section 3 of the paper **Immediate-Access Indexing Using Space-Efficient Extensible Arrays** by Alistair Moffat and Joel Mackenzie, published in 2022.
 
 * ACM ISBN 979-8-4007-0021-7/22/12
 * https://doi.org/10.1145/3572960.3572984
 
+This data structure supports `push` and `pop` operations and does _not_ support inserts or removes at other locations within the array. One exception is the `swap/remove` operation which will retrieve a value from a specified index, overwrite that slot with the value at the end of the array, decrement the count, and return the retrieved value.
+
 ### Background
 
-The design of this data structure is intended to work well with arena memory allocators.
-
-From section 2 of the paper:
+The intent of this data structure is that it will work well with arena memory allocators, and is designed to efficiently utilize a significant portion of the available RAM of a system. From section 2 of the paper:
 
 > More generally, the old and new segments must be assumed to be disjoint, and
 > at the critical transition moment both must be assumed to be present
-> simultaneously. That is, the momentary overhead space cost is 𝑘𝑛elements,
+> simultaneously. That is, the momentary overhead space cost is 𝑘𝑛 elements,
 > which is a substantial imposition, and might mean that memory utilization is
 > restricted to less than 50% of available capacity. Note that this accounting in
 > regard to the Geometric approach also relies on memory segments being reusable
@@ -26,7 +26,9 @@ From section 2 of the paper:
 
 The specification for the data structure is contained in section 3 of the paper.
 
-For a different but similar data structure, see the [nlfiedler/segarray](https://github.com/nlfiedler/segarray) repository for an implementation of Segment Arrays in Rust.
+### Memory Usage
+
+Compared to the `Vec` type in the Rust standard library, this data structure will have substantially less unused space, on the order of O(√N). The dope vector contributes to the overhead of this data structure, and that is on the order of O(√N). Based on the current implementation of `Vec`, as much as 50% of the space may be unused since it has a growth factor of 2. The [Segment Array]((https://github.com/nlfiedler/segarray)) has the same growth factor as `Vec` and potentially the same proportion of unused space (its dope vector is a fixed size).
 
 ## Examples
 
