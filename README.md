@@ -9,6 +9,15 @@ This Rust [crate](https://crates.io/crates/extarray) implements a growable array
 
 This data structure supports `push` and `pop` operations and does _not_ support inserts or removes at other locations within the array. One exception is the `swap/remove` operation which will retrieve a value from a specified index, overwrite that slot with the value at the end of the array, decrement the count, and return the retrieved value.
 
+This is part of a collection of similar data structures:
+
+* [Optimal Arrays](https://github.com/nlfiedler/optarray)
+    - Similar O(√N) space overhead and similar O(1) running time for most operations
+    - Markedly faster than Extensible Arrays for repeated pushes
+* [Segment Array](https://github.com/nlfiedler/segarray)
+    - Grows geometrically like `Vec`, hence O(N) space overhead
+    - Much faster than Extensible Arrays for repeated pushes
+
 ### Background
 
 The intent of this data structure is that it will work well with arena memory allocators, and is designed to efficiently utilize a significant portion of the available RAM of a system. From section 2 of the paper:
@@ -28,7 +37,7 @@ The specification for the data structure is contained in section 3 of the paper.
 
 ### Memory Usage
 
-Compared to the `Vec` type in the Rust standard library, this data structure will have substantially less unused space, on the order of O(√N). The dope vector contributes to the overhead of this data structure, and that is on the order of O(√N). Based on the current implementation of `Vec`, as much as 50% of the space may be unused since it has a growth factor of 2. The [Segment Array]((https://github.com/nlfiedler/segarray)) has the same growth factor as `Vec` and potentially the same proportion of unused space (its dope vector is a fixed size).
+Compared to the `Vec` type in the Rust standard library, this data structure will have substantially less unused space, on the order of O(√N). The dope vector contributes to the overhead of this data structure, and that is on the order of O(√N). Based on the current implementation of `Vec`, as much as 50% of the space may be unused since it has a growth factor of 2. The [Segment Array](https://github.com/nlfiedler/segarray) has the same growth factor as `Vec` and potentially the same proportion of unused space (its dope vector is a fixed size).
 
 ## Examples
 

@@ -32,10 +32,9 @@ use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::fmt;
 use std::ops::{Index, IndexMut};
 
-/// Produce the magic "33" needed for the mapping function.
-///
-/// This will be 65 if `usize` is 8 bytes.
-const LOG_BASE: u32 = (8 * std::mem::size_of::<usize>() + 1) as u32;
+/// The number of bits in a usize plus one to make the math in the mapping()
+/// function easier.
+const BEE_BASE: u32 = (8 * std::mem::size_of::<usize>() + 1) as u32;
 
 /// The highest numbered segment for each level and the corresponding length of
 /// segments for that level.
@@ -93,7 +92,7 @@ fn mapping(v: usize) -> (usize, usize) {
     let b = if v == 0 {
         1
     } else {
-        (LOG_BASE - v.leading_zeros()) >> 1
+        (BEE_BASE - v.leading_zeros()) >> 1
     };
     let segment = (v >> b) + (1 << (b - 1)) - 1;
     let slot = v & ((1 << b) - 1);
@@ -141,8 +140,8 @@ impl<T> ExtensibleArray<T> {
     /// Return an empty extensible array with zero capacity.
     ///
     /// Note that pre-allocating capacity has no benefit with this data
-    /// structure since append operations are always constant time and
-    /// no reallocation and copy is ever performed.
+    /// structure since append operations are always constant time and no
+    /// reallocation and copy is ever performed.
     pub fn new() -> Self {
         Self {
             count: 0,
@@ -340,7 +339,7 @@ impl<T> ExtensibleArray<T> {
     ///
     /// # Time complexity
     ///
-    /// sqrt(count)
+    /// O(n) if elements are droppable, otherwise O(sqrt(n))
     pub fn clear(&mut self) {
         use std::ptr::{drop_in_place, slice_from_raw_parts_mut};
 
@@ -1053,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    fn test_capacity_fn() {
+    fn test_capacity_for_count() {
         assert_eq!(capacity_for_count(0, 1), 0);
         assert_eq!(capacity_for_count(2, 1), 2);
         assert_eq!(capacity_for_count(3, 1), 4);

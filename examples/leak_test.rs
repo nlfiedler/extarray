@@ -24,6 +24,16 @@ fn main() {
     }
     drop(array);
 
+    // test pushing many elements then popping all of them
+    let mut array: ExtensibleArray<String> = ExtensibleArray::new();
+    for _ in 0..512 {
+        let value = ulid::Ulid::new().to_string();
+        array.push(value);
+    }
+    while !array.is_empty() {
+        array.pop();
+    }
+
     // IntoIterator: add only enough values to allocate one segment
     let mut array: ExtensibleArray<String> = ExtensibleArray::new();
     for _ in 0..2 {
