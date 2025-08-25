@@ -13,10 +13,10 @@ This is part of a collection of similar data structures:
 
 * [Optimal Arrays](https://github.com/nlfiedler/optarray)
     - Similar O(√N) space overhead and similar O(1) running time for most operations
-    - Markedly faster than Extensible Arrays for repeated pushes
+    - Faster than Extensible Arrays for repeated pushes but slower for ordered access
 * [Segment Array](https://github.com/nlfiedler/segarray)
     - Grows geometrically like `Vec`, hence O(N) space overhead
-    - Much faster than Extensible Arrays for repeated pushes
+    - Faster than Extensible Arrays for repeated pushes and ordered access
 
 ### Background
 
