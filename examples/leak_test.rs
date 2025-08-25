@@ -34,12 +34,10 @@ fn main() {
         array.pop();
     }
 
-    // IntoIterator: add only enough values to allocate one segment
+    // IntoIterator: add exactly one element to test special case
     let mut array: ExtensibleArray<String> = ExtensibleArray::new();
-    for _ in 0..2 {
-        let value = ulid::Ulid::new().to_string();
-        array.push(value);
-    }
+    let value = ulid::Ulid::new().to_string();
+    array.push(value);
     let itty = array.into_iter();
     drop(itty);
 

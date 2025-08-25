@@ -344,9 +344,9 @@ impl<T> ExtensibleArray<T> {
         use std::ptr::{drop_in_place, slice_from_raw_parts_mut};
 
         if self.count > 0 {
-            // find the last segment that contains values and drop them
-            let (last_segment, last_slot) = mapping(self.count - 1);
             if std::mem::needs_drop::<T>() {
+                // find the last segment that contains values and drop them
+                let (last_segment, last_slot) = mapping(self.count - 1);
                 unsafe {
                     // last_slot is pointing at the last element, need to add
                     // one to include it in the slice
@@ -355,40 +355,37 @@ impl<T> ExtensibleArray<T> {
                         last_slot + 1,
                     ));
                 }
-            }
-            // deallocate the last segment
-            let segment_len = slots_in_segment(last_segment);
-            let layout = Layout::array::<T>(segment_len).expect("unexpected overflow");
-            unsafe {
-                dealloc(self.dope[last_segment] as *mut u8, layout);
-            }
 
-            // drop the values in all of the preceding segments
-            let mut segment = 0;
-            for level in 1..=self.level {
-                let level_limit = last_segment_for_l(level);
-                let segment_len = segment_len_for_l(level);
-                while segment <= level_limit && segment < last_segment {
-                    if std::mem::needs_drop::<T>() {
+                // drop the values in all of the preceding segments
+                let mut segment = 0;
+                for level in 1..=self.level {
+                    let level_limit = last_segment_for_l(level);
+                    let segment_len = segment_len_for_l(level);
+                    while segment <= level_limit && segment < last_segment {
                         unsafe {
                             drop_in_place(slice_from_raw_parts_mut(
                                 self.dope[segment],
                                 segment_len,
                             ));
                         }
+                        segment += 1;
                     }
-                    let layout = Layout::array::<T>(segment_len).expect("unexpected overflow");
-                    unsafe {
-                        dealloc(self.dope[segment] as *mut u8, layout);
-                    }
-                    segment += 1;
                 }
             }
 
-            self.dope.clear();
             self.level = 1;
             self.count = 0;
         }
+
+        // deallocate all of the segments
+        for segment in 0..self.dope.len() {
+            let segment_len = slots_in_segment(segment);
+            let layout = Layout::array::<T>(segment_len).expect("unexpected overflow");
+            unsafe {
+                dealloc(self.dope[segment] as *mut u8, layout);
+            }
+        }
+        self.dope.clear();
     }
 }
 
@@ -495,7 +492,7 @@ impl<T> Drop for ExtArrayIntoIter<T> {
             let (last_segment, last_slot) = mapping(self.count - 1);
             if first_segment == last_segment {
                 // special-case, remaining values are in only one segment
-                if first_slot < last_slot {
+                if first_slot <= last_slot {
                     unsafe {
                         // last_slot is pointing at the last element, need to
                         // add one to include it in the slice
