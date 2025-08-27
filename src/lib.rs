@@ -16,11 +16,10 @@
 //!
 //! # Performance
 //!
-//! Most operations are either constant time, or log2 or sqrt of the collection
+//! Most operations are either constant time, log2, or sqrt of the collection
 //! size. However, the lookup operation involves several calculations and as
-//! such the overall performance will be worse than `Vec`. The difference will
-//! be in how memory is allocated over time, which _should_ help with arena
-//! memory allocators.
+//! such the overall performance will be worse than `Vec`. The advantage is that
+//! the memory overhead will be on the order of O(√N) vs O(N).
 //!
 //! # Safety
 //!

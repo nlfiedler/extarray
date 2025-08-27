@@ -20,7 +20,7 @@ This is part of a collection of similar data structures:
 
 ### Background
 
-The intent of this data structure is that it will work well with arena memory allocators, and is designed to efficiently utilize a significant portion of the available RAM of a system. From section 2 of the paper:
+The intent of this data structure is to minimize the memory overhead and thus efficiently utilize a significant portion of the available RAM of a system. From section 2 of the paper:
 
 > More generally, the old and new segments must be assumed to be disjoint, and
 > at the critical transition moment both must be assumed to be present
