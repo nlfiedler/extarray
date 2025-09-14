@@ -24,6 +24,19 @@ fn main() {
     }
     drop(array);
 
+    // push a bunch, pop a few, push more to test Grow/Shrink handling of the
+    // extra empty data block
+    let mut array: ExtensibleArray<u64> = ExtensibleArray::new();
+    for value in 0..35 {
+        array.push(value);
+    }
+    for _ in 0..10 {
+        array.pop();
+    }
+    for value in 0..12 {
+        array.push(value);
+    }
+
     // test pushing many elements then popping all of them
     let mut array: ExtensibleArray<String> = ExtensibleArray::new();
     for _ in 0..512 {

@@ -2,17 +2,21 @@
 // Copyright (c) 2025 Nathan Fiedler
 //
 
-//! An append-only (no insert or remove) growable array as described in section
-//! 3 of the paper "Immediate-Access Indexing Using Space-Efficient Extensible
-//! Arrays" by Alistair Moffat and Joel Mackenzie, published in 2022.
+//! An implemenation of extensible arrays as described in section 3 of the paper
+//! "Immediate-Access Indexing Using Space-Efficient Extensible Arrays" by
+//! Alistair Moffat and Joel Mackenzie, published in 2022.
 //!
 //! * ACM ISBN 979-8-4007-0021-7/22/12
 //! * https://doi.org/10.1145/3572960.3572984
 //!
-//! This data structure is meant to hold an unknown, though likely large, number
-//! of elements, otherwise `Vec` would be more appropriate. An empty array will
-//! have a size of around 40 bytes. The size may not be an issue, but the lookup
-//! operation has a non-trivial cost, unlike `Vec`.
+//! # Memory Usage
+//!
+//! An empty resizable array is approximately 88 bytes in size, and while
+//! holding elements it will have a space overhead on the order of O(√N). As
+//! elements are added the array will grow by allocating additional data blocks.
+//! Likewise, as elements are removed from the end of the array, data blocks
+//! will be deallocated as they become empty. At most one empty data block will
+//! be retained as an optimization.
 //!
 //! # Performance
 //!
@@ -31,63 +35,74 @@ use std::alloc::{Layout, alloc, dealloc, handle_alloc_error};
 use std::fmt;
 use std::ops::{Index, IndexMut};
 
+/// The number of bits in a usize for computing the block size of segments.
+const WORD_SIZE: u32 = (8 * std::mem::size_of::<usize>()) as u32;
+
 /// The number of bits in a usize plus one to make the math in the mapping()
 /// function easier.
-const BEE_BASE: u32 = (8 * std::mem::size_of::<usize>() + 1) as u32;
-
-/// The highest numbered segment for each level and the corresponding length of
-/// segments for that level.
-const SEGMENT_SIZES: [(usize, usize); 16] = [
-    (2, 2),
-    (5, 4),
-    (11, 8),
-    (23, 16),
-    (47, 32),
-    (95, 64),
-    (191, 128),
-    (383, 256),
-    (767, 512),
-    (1535, 1024),
-    (3071, 2048),
-    (6143, 4096),
-    (12287, 8192),
-    (24575, 16384),
-    (49151, 32768),
-    (98303, 65536),
-];
+const BEE_BASE: u32 = WORD_SIZE + 1;
 
 /// Compute the largest segment number for which the segment length is 2^l.
 ///
 /// From first paragraph of section 3 of the Moffat 2022 paper.
 #[inline]
 fn last_segment_for_l(l: usize) -> usize {
+    // This is simply the Thabit number minus 1, while adjusting the one-based l
+    // to a zero-based n (the l value is increased by 1 when the segment offset
+    // matches a Thabit number).
     3 * (1 << (l - 1)) - 2
 }
 
-/// Compute the length of segments for some value of l.
+/// Compute the number of elements that data blocks in level l can hold.
 ///
 /// From first paragraph of section 3 of the Moffat 2022 paper.
 #[inline]
-fn segment_len_for_l(l: usize) -> usize {
+fn datablock_capacity(l: usize) -> usize {
     1 << l
+}
+
+/// Compute the number of segments of the same length for some l.
+#[inline]
+fn superblock_capacity(l: usize) -> usize {
+    if l == 1 { 2 } else { 3 * (1 << (l - 2)) }
+}
+
+// Compute the total volume V(l) of all segments of length less than or equal to
+// 2^l which is simplified to 2^(2*l)
+//
+// N.B. this does not account for the actual allocated segments, so the value is
+// off by a bit since it only considers the l value.
+#[inline]
+fn capacity_for_l(l: usize) -> usize {
+    1 << (l << 1)
+}
+
+/// Derive the l value for the given segment offset.
+fn l_for_segment(segment: usize) -> usize {
+    // While unstated in the paper, the first segment for each zero-based level
+    // is a Thabit number (https://en.wikipedia.org/wiki/Thabit_number). Note
+    // that in the paper, l is one-based hence the conversion to zero-based n
+    // for the Thabit series.
+    let j = (segment + 1).div_ceil(3);
+    let k = (WORD_SIZE - j.leading_zeros() - 1) as usize;
+    let thabit = 3 * (1 << k) - 1;
+    if segment >= thabit { k + 2 } else { k + 1 }
 }
 
 /// Determine the number of slots in the given segment.
 fn slots_in_segment(segment: usize) -> usize {
-    for (max, len) in SEGMENT_SIZES {
-        if segment < max {
-            return len;
-        }
-    }
-    panic!("overflow, segment out of bounds")
+    datablock_capacity(l_for_segment(segment))
 }
 
 /// Compute the mapping from a one-dimensional array index to a two-dimensional
 /// segment number and offset pair.
 ///
 /// Algorithm 1 from the Moffat 2022 paper
-#[inline]
 fn mapping(v: usize) -> (usize, usize) {
+    // inlining this function is indeed faster, but increases the code size
+    // given the many call sites for this function; what's more, the other
+    // resizable array implementations cannot simply inline the locate function,
+    // so the performance comparisons become skewed
     let b = if v == 0 {
         1
     } else {
@@ -98,27 +113,23 @@ fn mapping(v: usize) -> (usize, usize) {
     (segment, slot)
 }
 
-/// Compute the capacity for an extensible array for a count and level.
+/// Compute the capacity for an extensible array for a given dope length.
 ///
-/// Running time is log2(count)/2.
-fn capacity_for_count(count: usize, level: usize) -> usize {
-    let mut capacity = 0;
-    if count > 0 {
-        let (last_segment, _) = mapping(count - 1);
-        let mut segment = 0;
-        for level in 1..=level {
-            let level_limit = last_segment_for_l(level);
-            let segment_len = segment_len_for_l(level);
-            let difference = if level_limit < last_segment {
-                level_limit - segment
-            } else {
-                last_segment - segment
-            } + 1;
-            capacity += segment_len * difference;
-            segment += difference;
-        }
+/// # Time complexity
+///
+/// Constant time.
+fn array_capacity(dope_len: usize) -> usize {
+    if dope_len == 0 {
+        0
+    } else {
+        let used_segments = dope_len - 1;
+        let level = l_for_segment(used_segments);
+        let level_capacity = capacity_for_l(level);
+        let block_capacity = datablock_capacity(level);
+        let last_segment = last_segment_for_l(level);
+        let unalloc_capacity = block_capacity * (last_segment - used_segments);
+        level_capacity - unalloc_capacity
     }
-    capacity
 }
 
 ///
@@ -127,12 +138,24 @@ fn capacity_for_count(count: usize, level: usize) -> usize {
 /// employ.
 ///
 pub struct ExtensibleArray<T> {
+    // dope vector, holds pointers to allocated segments
+    dope: Vec<*mut T>,
     // number of elements stored in the array
     count: usize,
     // the 'l' value from the Moffat 2022 paper
     level: usize,
-    // dope vector, holds pointers to allocated segments
-    dope: Vec<*mut T>,
+    /// number of non-empty data blocks
+    d: usize,
+    /// number of empty data blocks (either 0 or 1)
+    empty: usize,
+    /// number of elements in last non-empty data block
+    last_db_length: usize,
+    /// capacity of the last non-empty data block
+    last_db_capacity: usize,
+    /// number of data blocks in last non-empty super block
+    last_sb_length: usize,
+    /// capacity of data blocks the last non-empty super block
+    last_sb_capacity: usize,
 }
 
 impl<T> ExtensibleArray<T> {
@@ -143,9 +166,15 @@ impl<T> ExtensibleArray<T> {
     /// reallocation and copy is ever performed.
     pub fn new() -> Self {
         Self {
+            dope: vec![],
             count: 0,
             level: 1,
-            dope: vec![],
+            d: 0,
+            empty: 0,
+            last_db_length: 0,
+            last_db_capacity: 0,
+            last_sb_length: 0,
+            last_sb_capacity: 0,
         }
     }
 
@@ -159,33 +188,41 @@ impl<T> ExtensibleArray<T> {
     ///
     /// Constant time.
     pub fn push(&mut self, value: T) {
-        // lookup the segment and slot
-        let (segment, slot) = mapping(self.count);
-        if self.dope.len() <= segment {
-            // need to add another segment
-            if self.dope.len() > last_segment_for_l(self.level) {
-                // when the size of the dope vector (1-based) is greater than
-                // the segment number of the last segment of length 2^l, then
-                // increase to the next level and hence next segment length
+        // if the last non-empty data block is full...
+        if self.last_db_capacity == self.last_db_length {
+            // if the last superblock is full...
+            if self.last_sb_capacity == self.last_sb_length {
+                self.last_sb_capacity = superblock_capacity(self.level);
+                self.last_db_capacity = datablock_capacity(self.level);
+                self.last_sb_length = 0;
                 self.level += 1;
             }
-            let segment_len = segment_len_for_l(self.level);
-            // overflowing the allocator is very unlikely as the item size would
-            // have to be very large (the longest segment will be 65,536 items)
-            let layout = Layout::array::<T>(segment_len).expect("unexpected overflow");
-            unsafe {
-                let ptr = alloc(layout).cast::<T>();
-                if ptr.is_null() {
-                    handle_alloc_error(layout);
+            // if there are no empty data blocks...
+            if self.empty == 0 {
+                // allocate new data block, add to dope vector
+                let layout =
+                    Layout::array::<T>(self.last_db_capacity).expect("unexpected overflow");
+                unsafe {
+                    let ptr = alloc(layout).cast::<T>();
+                    if ptr.is_null() {
+                        handle_alloc_error(layout);
+                    }
+                    self.dope.push(ptr);
                 }
-                self.dope.push(ptr);
+            } else {
+                // reuse the previously allocated empty data block
+                self.empty = 0;
             }
+            self.d += 1;
+            self.last_sb_length += 1;
+            self.last_db_length = 0;
         }
-
+        let (segment, slot) = mapping(self.count);
         unsafe {
             std::ptr::write(self.dope[segment].add(slot), value);
         }
         self.count += 1;
+        self.last_db_length += 1;
     }
 
     /// Appends an element if there is sufficient spare capacity, otherwise an
@@ -204,6 +241,50 @@ impl<T> ExtensibleArray<T> {
         }
     }
 
+    /// Deallocate segments as they become empty.
+    fn shrink(&mut self) {
+        self.count -= 1;
+        self.last_db_length -= 1;
+        // if last data block is empty...
+        if self.last_db_length == 0 {
+            // if there is another empty data block, Deallocate it
+            if self.empty == 1 {
+                let ptr = self.dope.pop().expect("programmer error");
+                let block = self.dope.len();
+                let block_len = slots_in_segment(block);
+                let layout = Layout::array::<T>(block_len).expect("unexpected overflow");
+                unsafe {
+                    dealloc(ptr as *mut u8, layout);
+                }
+            }
+            // leave this last empty data block in case more pushes occur and we
+            // would soon be allocating the same sized block again
+            self.empty = 1;
+            // if the index block is quarter full, shrink to half
+            if self.dope.len() * 4 <= self.dope.capacity() {
+                self.dope.shrink_to(self.dope.capacity() / 2);
+            }
+            // decrement d and number of data blocks in last superblock
+            self.d -= 1;
+            self.last_sb_length -= 1;
+            // if last superblock is empty...
+            if self.last_sb_length == 0 {
+                self.level -= 1;
+                if self.level == 1 {
+                    self.last_sb_capacity = 0;
+                    self.last_db_capacity = 0;
+                } else {
+                    self.last_sb_capacity = superblock_capacity(self.level - 1);
+                    self.last_db_capacity = datablock_capacity(self.level - 1);
+                }
+                // set occupancy of last superblock to full
+                self.last_sb_length = self.last_sb_capacity;
+            }
+            // set occupancy of last data block to full
+            self.last_db_length = self.last_db_capacity;
+        }
+    }
+
     /// Removes the last element from an array and returns it, or `None` if it
     /// is empty.
     ///
@@ -212,9 +293,10 @@ impl<T> ExtensibleArray<T> {
     /// Constant time.
     pub fn pop(&mut self) -> Option<T> {
         if self.count > 0 {
-            self.count -= 1;
-            let (segment, slot) = mapping(self.count);
-            unsafe { Some((self.dope[segment].add(slot)).read()) }
+            let (segment, slot) = mapping(self.count - 1);
+            let value = unsafe { Some((self.dope[segment].add(slot)).read()) };
+            self.shrink();
+            value
         } else {
             None
         }
@@ -253,7 +335,7 @@ impl<T> ExtensibleArray<T> {
     ///
     /// log2(count)/2
     pub fn capacity(&self) -> usize {
-        capacity_for_count(self.count, self.level)
+        array_capacity(self.dope.len())
     }
 
     /// Returns true if the array has a length of 0.
@@ -315,10 +397,10 @@ impl<T> ExtensibleArray<T> {
             let index_ptr = self.dope[segment].add(slot);
             let value = index_ptr.read();
             // find the pointer of the last element and copy to index pointer
-            self.count -= 1;
-            let (segment, slot) = mapping(self.count);
+            let (segment, slot) = mapping(self.count - 1);
             let last_ptr = self.dope[segment].add(slot);
             std::ptr::copy(last_ptr, index_ptr, 1);
+            self.shrink();
             value
         }
     }
@@ -359,7 +441,7 @@ impl<T> ExtensibleArray<T> {
                 let mut segment = 0;
                 for level in 1..=self.level {
                     let level_limit = last_segment_for_l(level);
-                    let segment_len = segment_len_for_l(level);
+                    let segment_len = datablock_capacity(level);
                     while segment <= level_limit && segment < last_segment {
                         unsafe {
                             drop_in_place(slice_from_raw_parts_mut(
@@ -374,9 +456,15 @@ impl<T> ExtensibleArray<T> {
 
             self.level = 1;
             self.count = 0;
+            self.d = 0;
+            self.empty = 0;
+            self.last_db_length = 0;
+            self.last_db_capacity = 0;
+            self.last_sb_length = 0;
+            self.last_sb_capacity = 0;
         }
 
-        // deallocate all of the segments
+        // deallocate all segments using the index as the source of truth
         for segment in 0..self.dope.len() {
             let segment_len = slots_in_segment(segment);
             let layout = Layout::array::<T>(segment_len).expect("unexpected overflow");
@@ -396,14 +484,17 @@ impl<T> Default for ExtensibleArray<T> {
 
 impl<T> fmt::Display for ExtensibleArray<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let longest_segment = segment_len_for_l(self.level);
         write!(
             f,
-            "ExtensibleArray(count: {}, level: {}, used_segments: {}, longest segment: {})",
+            "ExtensibleArray(n: {}, s: {}, d: {}, e: {}, dl: {}, dc: {}, sl: {}, sc: {})",
             self.count,
             self.level,
-            self.dope.len(),
-            longest_segment
+            self.d,
+            self.empty,
+            self.last_db_length,
+            self.last_db_capacity,
+            self.last_sb_length,
+            self.last_sb_capacity
         )
     }
 }
@@ -635,6 +726,22 @@ mod tests {
     }
 
     #[test]
+    fn test_pop_and_shrink() {
+        let mut sut: ExtensibleArray<usize> = ExtensibleArray::new();
+        for value in 0..8 {
+            sut.push(value);
+        }
+        assert_eq!(sut.len(), 8);
+        assert_eq!(sut.capacity(), 8);
+        while !sut.is_empty() {
+            sut.pop();
+        }
+        assert_eq!(sut.len(), 0);
+        // empty block has size 2
+        assert_eq!(sut.capacity(), 2);
+    }
+
+    #[test]
     fn test_push_within_capacity() {
         // empty array has no allocated space
         let mut sut: ExtensibleArray<u32> = ExtensibleArray::new();
@@ -687,12 +794,57 @@ mod tests {
     fn test_push_many_pop_all_verify() {
         // push many values, then pop all off and verify
         let mut sut: ExtensibleArray<usize> = ExtensibleArray::new();
+        assert_eq!(sut.len(), 0);
+        assert_eq!(sut.capacity(), 0);
         for value in 0..16384 {
             sut.push(value);
         }
+        assert_eq!(sut.len(), 16384);
+        assert_eq!(sut.capacity(), 16384);
         for value in (0..16384).rev() {
             assert_eq!(sut.pop(), Some(value));
         }
+        assert_eq!(sut.len(), 0);
+        // empty block has size 2
+        assert_eq!(sut.capacity(), 2);
+    }
+
+    #[test]
+    fn test_push_pop_grow_shrink_empty_block() {
+        // test the handling of the extra empty data block when pushing and
+        // popping values that cross over a level boundary and thereby the extra
+        // empty data block is a different size than the newly emptied data
+        // block (push enough to reach level 3, then pop enough to get to level
+        // 2, then push again)
+        let mut sut: ExtensibleArray<usize> = ExtensibleArray::new();
+        assert_eq!(sut.len(), 0);
+        assert_eq!(sut.capacity(), 0);
+        for value in 0..20 {
+            sut.push(value);
+        }
+        assert_eq!(sut.len(), 20);
+        assert_eq!(sut.capacity(), 24);
+        for _ in 0..5 {
+            sut.pop();
+        }
+        assert_eq!(sut.len(), 15);
+        assert_eq!(sut.capacity(), 24);
+        for _ in 0..5 {
+            sut.pop();
+        }
+        assert_eq!(sut.len(), 10);
+        assert_eq!(sut.capacity(), 16);
+        for value in 10..22 {
+            sut.push(value);
+        }
+        assert_eq!(sut.len(), 22);
+        assert_eq!(sut.capacity(), 24);
+        for (idx, elem) in sut.iter().enumerate() {
+            assert_eq!(idx, *elem);
+        }
+
+        // try to trigger any clear/drop logic
+        sut.clear();
     }
 
     #[test]
@@ -1018,22 +1170,22 @@ mod tests {
     #[test]
     fn test_segment_len() {
         // l cannot be zero, but segment numbers are 0-based
-        assert_eq!(segment_len_for_l(1), 2);
-        assert_eq!(segment_len_for_l(2), 4);
-        assert_eq!(segment_len_for_l(3), 8);
-        assert_eq!(segment_len_for_l(4), 16);
-        assert_eq!(segment_len_for_l(5), 32);
-        assert_eq!(segment_len_for_l(6), 64);
-        assert_eq!(segment_len_for_l(7), 128);
-        assert_eq!(segment_len_for_l(8), 256);
-        assert_eq!(segment_len_for_l(9), 512);
-        assert_eq!(segment_len_for_l(10), 1024);
-        assert_eq!(segment_len_for_l(11), 2048);
-        assert_eq!(segment_len_for_l(12), 4096);
-        assert_eq!(segment_len_for_l(13), 8192);
-        assert_eq!(segment_len_for_l(14), 16384);
-        assert_eq!(segment_len_for_l(15), 32768);
-        assert_eq!(segment_len_for_l(16), 65536);
+        assert_eq!(datablock_capacity(1), 2);
+        assert_eq!(datablock_capacity(2), 4);
+        assert_eq!(datablock_capacity(3), 8);
+        assert_eq!(datablock_capacity(4), 16);
+        assert_eq!(datablock_capacity(5), 32);
+        assert_eq!(datablock_capacity(6), 64);
+        assert_eq!(datablock_capacity(7), 128);
+        assert_eq!(datablock_capacity(8), 256);
+        assert_eq!(datablock_capacity(9), 512);
+        assert_eq!(datablock_capacity(10), 1024);
+        assert_eq!(datablock_capacity(11), 2048);
+        assert_eq!(datablock_capacity(12), 4096);
+        assert_eq!(datablock_capacity(13), 8192);
+        assert_eq!(datablock_capacity(14), 16384);
+        assert_eq!(datablock_capacity(15), 32768);
+        assert_eq!(datablock_capacity(16), 65536);
     }
 
     #[test]
@@ -1043,6 +1195,14 @@ mod tests {
         assert_eq!(mapping(2), (1, 0));
         assert_eq!(mapping(3), (1, 1));
         assert_eq!(mapping(4), (2, 0));
+        assert_eq!(mapping(5), (2, 1));
+        assert_eq!(mapping(6), (2, 2));
+        assert_eq!(mapping(7), (2, 3));
+        assert_eq!(mapping(8), (3, 0));
+        assert_eq!(mapping(9), (3, 1));
+        assert_eq!(mapping(10), (3, 2));
+        assert_eq!(mapping(11), (3, 3));
+        assert_eq!(mapping(12), (4, 0));
         assert_eq!(mapping(72), (11, 8));
         assert_eq!(mapping(248), (22, 8));
         assert_eq!(mapping(4567), (98, 87)); // from the Moffat 2022 paper
@@ -1060,17 +1220,68 @@ mod tests {
     }
 
     #[test]
-    fn test_capacity_for_count() {
-        assert_eq!(capacity_for_count(0, 1), 0);
-        assert_eq!(capacity_for_count(2, 1), 2);
-        assert_eq!(capacity_for_count(3, 1), 4);
-        assert_eq!(capacity_for_count(5, 2), 8);
-        assert_eq!(capacity_for_count(10, 2), 12);
-        assert_eq!(capacity_for_count(100, 4), 112);
-        assert_eq!(capacity_for_count(250, 4), 256);
-        assert_eq!(capacity_for_count(310, 5), 320);
-        assert_eq!(capacity_for_count(1000, 5), 1024);
-        assert_eq!(capacity_for_count(15000, 7), 15104);
+    fn test_array_capacity() {
+        assert_eq!(array_capacity(0), 0);
+        assert_eq!(array_capacity(1), 2);
+        assert_eq!(array_capacity(2), 4);
+        assert_eq!(array_capacity(3), 8);
+        assert_eq!(array_capacity(4), 12);
+        assert_eq!(array_capacity(5), 16);
+        assert_eq!(array_capacity(8), 40);
+        assert_eq!(array_capacity(12), 80);
+    }
+
+    #[test]
+    fn test_l_for_segment() {
+        assert_eq!(l_for_segment(0), 1);
+        assert_eq!(l_for_segment(1), 1);
+        assert_eq!(l_for_segment(2), 2);
+        assert_eq!(l_for_segment(3), 2);
+        assert_eq!(l_for_segment(4), 2);
+        assert_eq!(l_for_segment(5), 3);
+        assert_eq!(l_for_segment(6), 3);
+        assert_eq!(l_for_segment(7), 3);
+        assert_eq!(l_for_segment(8), 3);
+        assert_eq!(l_for_segment(9), 3);
+        assert_eq!(l_for_segment(10), 3);
+        assert_eq!(l_for_segment(11), 4);
+        assert_eq!(l_for_segment(12), 4);
+        assert_eq!(l_for_segment(13), 4);
+        assert_eq!(l_for_segment(14), 4);
+        assert_eq!(l_for_segment(15), 4);
+        assert_eq!(l_for_segment(16), 4);
+        assert_eq!(l_for_segment(17), 4);
+        assert_eq!(l_for_segment(18), 4);
+        assert_eq!(l_for_segment(19), 4);
+        assert_eq!(l_for_segment(20), 4);
+        assert_eq!(l_for_segment(21), 4);
+        assert_eq!(l_for_segment(22), 4);
+        assert_eq!(l_for_segment(23), 5);
+        assert_eq!(l_for_segment(47), 6);
+        assert_eq!(l_for_segment(94), 6);
+        assert_eq!(l_for_segment(95), 7);
+        assert_eq!(l_for_segment(190), 7);
+        assert_eq!(l_for_segment(191), 8);
+        assert_eq!(l_for_segment(382), 8);
+        assert_eq!(l_for_segment(383), 9);
+        assert_eq!(l_for_segment(767), 10);
+        assert_eq!(l_for_segment(1534), 10);
+        assert_eq!(l_for_segment(1535), 11);
+        assert_eq!(l_for_segment(3070), 11);
+        assert_eq!(l_for_segment(3071), 12);
+        assert_eq!(l_for_segment(6142), 12);
+        assert_eq!(l_for_segment(6143), 13);
+        assert_eq!(l_for_segment(12286), 13);
+        assert_eq!(l_for_segment(12287), 14);
+        assert_eq!(l_for_segment(24574), 14);
+        assert_eq!(l_for_segment(24575), 15);
+        assert_eq!(l_for_segment(49150), 15);
+        assert_eq!(l_for_segment(49151), 16);
+        assert_eq!(l_for_segment(98303), 17);
+        assert_eq!(l_for_segment(196607), 18);
+        assert_eq!(l_for_segment(393215), 19);
+        assert_eq!(l_for_segment(786431), 20);
+        assert_eq!(l_for_segment(1572863), 21);
     }
 
     #[test]
@@ -1102,24 +1313,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow, segment out of bounds")]
+    #[should_panic(expected = "attempt to add with overflow")]
     fn test_slots_in_segment_bounds() {
-        slots_in_segment(100_000);
+        // not a practical test, but eventually the function will overflow
+        slots_in_segment(usize::MAX);
     }
 
     #[test]
-    fn test_theory_capacity_for_l() {
-        // for the sake of theoretical research...
-        //
-        // Compute the total volume V(l) of all segments of length less than or
-        // equal to 2^l which is simplified to 2^(2*l)
-        //
-        // N.B. this does not account for the actual allocated segments, so the
-        //      value is off by a bit since it only considers the l value
-        fn capacity_for_l(l: usize) -> usize {
-            1 << (l << 1)
-        }
-
+    fn test_capacity_for_l() {
         assert_eq!(capacity_for_l(1), 4);
         assert_eq!(capacity_for_l(2), 16);
         assert_eq!(capacity_for_l(3), 64);
@@ -1139,30 +1340,23 @@ mod tests {
     }
 
     #[test]
-    fn test_theory_num_segments_for_l() {
-        // for the sake of theoretical research...
-        //
-        // Compute the number of segments of the same length for some l.
-        fn num_segments_for_l(l: usize) -> usize {
-            if l == 1 { 2 } else { 3 * (1 << (l - 2)) }
-        }
-
+    fn test_superblock_capacity() {
         // l cannot be zero, but segment numbers are 0-based
-        assert_eq!(num_segments_for_l(1), 2);
-        assert_eq!(num_segments_for_l(2), 3);
-        assert_eq!(num_segments_for_l(3), 6);
-        assert_eq!(num_segments_for_l(4), 12);
-        assert_eq!(num_segments_for_l(5), 24);
-        assert_eq!(num_segments_for_l(6), 48);
-        assert_eq!(num_segments_for_l(7), 96);
-        assert_eq!(num_segments_for_l(8), 192);
-        assert_eq!(num_segments_for_l(9), 384);
-        assert_eq!(num_segments_for_l(10), 768);
-        assert_eq!(num_segments_for_l(11), 1536);
-        assert_eq!(num_segments_for_l(12), 3072);
-        assert_eq!(num_segments_for_l(13), 6144);
-        assert_eq!(num_segments_for_l(14), 12288);
-        assert_eq!(num_segments_for_l(15), 24576);
-        assert_eq!(num_segments_for_l(16), 49152);
+        assert_eq!(superblock_capacity(1), 2);
+        assert_eq!(superblock_capacity(2), 3);
+        assert_eq!(superblock_capacity(3), 6);
+        assert_eq!(superblock_capacity(4), 12);
+        assert_eq!(superblock_capacity(5), 24);
+        assert_eq!(superblock_capacity(6), 48);
+        assert_eq!(superblock_capacity(7), 96);
+        assert_eq!(superblock_capacity(8), 192);
+        assert_eq!(superblock_capacity(9), 384);
+        assert_eq!(superblock_capacity(10), 768);
+        assert_eq!(superblock_capacity(11), 1536);
+        assert_eq!(superblock_capacity(12), 3072);
+        assert_eq!(superblock_capacity(13), 6144);
+        assert_eq!(superblock_capacity(14), 12288);
+        assert_eq!(superblock_capacity(15), 24576);
+        assert_eq!(superblock_capacity(16), 49152);
     }
 }
