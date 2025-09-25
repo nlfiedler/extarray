@@ -11,9 +11,12 @@ This data structure supports `push` and `pop` operations and does _not_ support 
 
 This is part of a collection of similar data structures:
 
-* [Optimal Arrays](https://github.com/nlfiedler/optarray)
+* [Optimal Arrays (Brodnik et. al.)](https://github.com/nlfiedler/optarray)
     - Similar O(√N) space overhead and similar O(1) running time for most operations
     - Faster than Extensible Arrays for repeated pushes but slower for ordered access
+* [Optimal Arrays (Tarjan and Zwick)](https://github.com/nlfiedler/tzarrays)
+    - O(rN^1/r) space overhead and similar O(1) running time for most operations
+    - Copying during grow/shrink adds significant time to overall performance
 * [Segment Array](https://github.com/nlfiedler/segarray)
     - Grows geometrically like `Vec`, hence O(N) space overhead
     - Faster than Extensible Arrays for repeated pushes and ordered access

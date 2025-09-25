@@ -122,20 +122,18 @@ fn array_capacity(dope_len: usize) -> usize {
     if dope_len == 0 {
         0
     } else {
-        let used_segments = dope_len - 1;
-        let level = l_for_segment(used_segments);
+        let last_segment = dope_len - 1;
+        let level = l_for_segment(last_segment);
         let level_capacity = capacity_for_l(level);
         let block_capacity = datablock_capacity(level);
-        let last_segment = last_segment_for_l(level);
-        let unalloc_capacity = block_capacity * (last_segment - used_segments);
+        let most_segment = last_segment_for_l(level);
+        let unalloc_capacity = block_capacity * (most_segment - last_segment);
         level_capacity - unalloc_capacity
     }
 }
 
 ///
-/// Append-only growable array that uses a list of progressivly larger segments
-/// to avoid the allocate-and-copy that many growable data structures typically
-/// employ.
+/// Growable array as described by Moffat and Mackenzie.
 ///
 pub struct ExtensibleArray<T> {
     // dope vector, holds pointers to allocated segments

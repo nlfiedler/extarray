@@ -1,6 +1,6 @@
 [package]
 name = "extarray"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
 authors = ["Nathan Fiedler <nathanfiedler@fastmail.fm>"]
 description = "Space-Efficient Extensible Arrays"
