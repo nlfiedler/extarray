@@ -136,11 +136,11 @@ fn array_capacity(dope_len: usize) -> usize {
 /// Growable array as described by Moffat and Mackenzie.
 ///
 pub struct ExtensibleArray<T> {
-    // dope vector, holds pointers to allocated segments
+    /// dope vector, holds pointers to allocated segments
     dope: Vec<*mut T>,
-    // number of elements stored in the array
+    /// number of elements stored in the array
     count: usize,
-    // the 'l' value from the Moffat 2022 paper
+    /// the 'l' value from the Moffat 2022 paper
     level: usize,
     /// number of non-empty data blocks
     d: usize,
@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_fromiterator() {
+    fn test_from_iterator() {
         let mut inputs: Vec<i32> = Vec::new();
         for value in 0..10_000 {
             inputs.push(value);
@@ -1053,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_iterator() {
+    fn test_iterator() {
         let inputs = [
             "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
         ];
@@ -1067,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_intoiterator() {
+    fn test_into_iterator() {
         // an array that only requires a single segment
         let inputs = [
             "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_intoiterator_drop_tiny() {
+    fn test_into_iterator_drop_tiny() {
         // an array that only requires a single segment and only some need to be
         // dropped after partially iterating the values
         let inputs = [
@@ -1102,7 +1102,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_intoiterator_drop_large() {
+    fn test_into_iterator_drop_large() {
         // by adding 512 values and iterating less than 64 times, there will be
         // values in the first segment and some in the last segment, and two
         // segments inbetween that all need to be dropped
@@ -1218,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_array_capacity() {
+    fn test_capacity() {
         assert_eq!(array_capacity(0), 0);
         assert_eq!(array_capacity(1), 2);
         assert_eq!(array_capacity(2), 4);
