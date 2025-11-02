@@ -1,0 +1,8 @@
+name: extarray
+services:
+  leaktest:
+    build:
+      context: ..
+      dockerfile: containers/Dockerfile
+    stdin_open: true
+    tty: true

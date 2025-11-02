@@ -575,7 +575,7 @@ impl<T> Drop for ExtArrayIntoIter<T> {
     fn drop(&mut self) {
         use std::ptr::{drop_in_place, slice_from_raw_parts_mut};
 
-        if std::mem::needs_drop::<T>() {
+        if self.count > 0 && std::mem::needs_drop::<T>() {
             let (first_segment, first_slot) = mapping(self.index);
             let (last_segment, last_slot) = mapping(self.count - 1);
             if first_segment == last_segment {
@@ -1080,6 +1080,12 @@ mod tests {
             assert_eq!(inputs[idx], elem);
         }
         // sut.len(); // error: ownership of sut was moved
+    }
+
+    #[test]
+    fn test_into_iterator_drop_empty() {
+        let sut: ExtensibleArray<String> = ExtensibleArray::new();
+        assert_eq!(sut.into_iter().count(), 0);
     }
 
     #[test]

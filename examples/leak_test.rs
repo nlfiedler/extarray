@@ -68,4 +68,5 @@ fn main() {
             break;
         }
     }
+    println!("extensible array tests complete");
 }
