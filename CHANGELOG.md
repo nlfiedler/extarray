@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 This file follows the convention described at
 [Keep a Changelog](http://keepachangelog.com/en/1.0.0/).
 
+## [1.1.1] - 2025-11-01
+### Changed
+- Fix crash when dropping empty `IntoIterator`.
+
 ## [1.1.0] - 2025-09-24
 ### Changed
 - Array capacity shrinks as elements are removed.
