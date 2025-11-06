@@ -590,7 +590,7 @@ impl<T> Drop for ExtArrayIntoIter<T> {
                         ));
                     }
                 }
-            } else {
+            } else if first_segment < last_segment {
                 // drop the remaining values in the first segment
                 let segment_len = slots_in_segment(first_segment);
                 if segment_len < self.count {
@@ -1071,6 +1071,22 @@ mod tests {
         // an array that only requires a single segment
         let inputs = [
             "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        ];
+        let mut sut: ExtensibleArray<String> = ExtensibleArray::new();
+        for item in inputs {
+            sut.push(item.to_owned());
+        }
+        for (idx, elem) in sut.into_iter().enumerate() {
+            assert_eq!(inputs[idx], elem);
+        }
+        // sut.len(); // error: ownership of sut was moved
+    }
+
+    #[test]
+    fn test_into_iterator_edge_case() {
+        // iterate to the end (of the last data block)
+        let inputs = [
+            "one", "two", "three", "four", "five", "six", "seven", "eight",
         ];
         let mut sut: ExtensibleArray<String> = ExtensibleArray::new();
         for item in inputs {
